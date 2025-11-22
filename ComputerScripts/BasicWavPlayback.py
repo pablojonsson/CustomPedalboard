@@ -94,10 +94,51 @@ def apply_delay(input_signal, samplerate, delay_time, feedback, mix=.5):
 
     return output_signal
 
+# double comb filter
+
+
+def two_parallel_combs(input_signal, samplerate, delay_time1=.03, feedback1=.7, delay_time2=.037, feedback2=.7):
+    if input_signal.ndim > 1:
+        input_signal = np.mean(input_signal, axis=1)
+
+    output = np.zeros_like(input_signal)
+
+    M1 = int(delay_time1 * samplerate)
+    M2 = int(delay_time2 * samplerate)
+
+    buffer1 = np.zeros(M1)
+    buffer2 = np.zeros(M2)
+    idx1, idx2 = 0, 0
+
+    for n in range(len(input_signal)):
+        current_input = input_signal[n]
+
+        delayed1 = buffer1[idx1]
+        out1 = current_input + feedback1 * delayed1
+        buffer1[idx1] = current_input + feedback1 * delayed1
+        idx1 = (idx1 + 1) % M1
+
+        delayed2 = buffer2[idx2]
+        out2 = current_input + feedback2 * delayed2
+        buffer2[idx2] = current_input + feedback2 * delayed2
+        idx2 = (idx2 + 1) % M2
+
+        output[n] = (out1 + out2) / 2.0
+
+    return output
+# applies a digital reverb to the given signal using several parallel comb filters
+# all fed into two all pass filters in series.
+
+
+def apply_reverb(input_signal, samplerate, delay_time=.03, feedback=.7):
+    output_signal = two_parallel_combs(input_signal, samplerate)
+    return output_signal
+
 
 EFFECTS_REGISTRY = {
     'gain': apply_gain,
-    'delay': apply_delay
+    'delay': apply_delay,
+    'reverb': apply_reverb
 }
 
 
@@ -125,6 +166,17 @@ def get_effect_parameters(effect_name):
         params['delay_time'] = delay_time
         params['feedback'] = feedback
         params['mix'] = mix
+
+    elif effect_name == 'reverb':
+        try:
+            delay_time = float(input("Enter delay time in seconds: "))
+            feedback = float(input("Enter feedback amount (0.0 - 1.0): "))
+        except ValueError:
+            print("Invalid input, Using default reverb parameters")
+            delay_time = .03
+            feedback = .7
+        params['delay_time'] = delay_time
+        params['feedback'] = feedback
 
     # more elif statements for more effects
 
@@ -259,7 +311,7 @@ def process_audio_chain(input_signal, samplerate, signal_chain):
         print(f"Applying {effect_func.__name__.replace('apply_', '')}...")
 
         try:
-            if effect_func == apply_delay:
+            if effect_func == apply_delay or effect_func == apply_reverb:
                 current_signal = effect_func(
                     current_signal, samplerate, **params)
             else:
