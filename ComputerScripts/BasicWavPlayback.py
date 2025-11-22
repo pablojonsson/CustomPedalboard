@@ -95,57 +95,181 @@ def apply_delay(input_signal, samplerate, delay_time, feedback, mix=.5):
     return output_signal
 
 
+EFFECTS_REGISTRY = {
+    'gain': apply_gain,
+    'delay': apply_delay
+}
+
+
+def get_effect_parameters(effect_name):
+    params = {}
+
+    if effect_name == 'gain':
+        try:
+            gain_db = float(input("Enter gain in dB: "))
+        except ValueError:
+            print("Invalid input. Using default gain of 0dB.")
+            gain_db = 0.0
+        params['gain_db'] = gain_db
+
+    elif effect_name == 'delay':
+        try:
+            delay_time = float(input("Enter delay time in seconds: "))
+            feedback = float(input("Enter feedback amount (0.0-1.0): "))
+            mix = float(input("Enter drt/wet mix (0.0 = dry, 1.0 = wet): "))
+        except ValueError:
+            print("Invalid input. Using default delay parameters")
+            delay_time = .3
+            feedback = .5
+            mix = .5
+        params['delay_time'] = delay_time
+        params['feedback'] = feedback
+        params['mix'] = mix
+
+    # more elif statements for more effects
+
+    return params
+
+
+def build_signal_chain():
+    signal_chain = []
+
+    print("\n" + "="*50)
+    print("BUILD YOUR PEDALBOARD")
+    print("="*50)
+    print(f"Available effects: {', '.join(EFFECTS_REGISTRY.keys())}")
+    print("Type the name of an effect to add it to your chain.")
+    print("Type 'done' when finished building your chain.")
+    print("Type 'quit' to exit the program.")
+    print("Type 'list' to see current chain.")
+    print("Type 'remove' to remove last effect.")
+    print("-" * 50)
+
+    while True:
+        user_input = input("\nAdd effect > ").lower().strip()
+
+        if user_input == 'done':
+            if not signal_chain:
+                print("No effects in chain. Using dry signal.")
+            break
+        elif user_input == 'quit':
+            return None
+        elif user_input == 'list':
+            if signal_chain:
+                chain_names = [func.__name__.replace(
+                    'apply_', '') for func, _ in signal_chain]
+                print(f"Current chain: {' -> '.join(chain_names)}")
+            else:
+                print("Chain is empty.")
+        elif user_input == 'remove':
+            if signal_chain:
+                removed_effect = signal_chain.pop()
+                print(
+                    f"Removed {removed_effect[0].__name__.replace('apply_', '')}")
+                if signal_chain:
+                    chain_names = [func.__name__.replace(
+                        'apply_', '') for func, _ in signal_chain]
+                    print(f"Current chain: {' -> '.join(chain_names)}")
+                else:
+                    print("Chain is now empty.")
+            else:
+                print("No effects to remove.")
+        elif user_input in EFFECTS_REGISTRY:
+            effect_func = EFFECTS_REGISTRY[user_input]
+            print(f"\nConfiguring {user_input}...")
+
+            params = get_effect_parameters(user_input)
+
+            signal_chain.append((effect_func, params))
+            print(f"Added {user_input} to the signal chain.")
+
+            chain_names = [func.__name__.replace(
+                'apply_', '') for func, _ in signal_chain]
+            print(f"Current chain: {' -> '.join(chain_names)}")
+            print("Add another effect or type 'done' to finish.")
+        else:
+            print(
+                f"Unknown effect '{user_input}'. Available effects: {', '.join(EFFECTS_REGISTRY.keys())}")
+            print(
+                "Type 'list' to see current chain, 'done' to finish, or 'quit' to exit.")
+
+    return signal_chain
+
+
 def main():
     FILENAME_IN = "P:\\CustomPedalboard\\AudioSamples\\CleanGuitar.wav"
-    FILENAME_OUT = "P:\\CustomPedalboard\\AudioSamples\\modified.wav"
+    FILENAME_OUT = "P:\\CustomPedalboard\\AudioSamples\\processed_chain.wav"
 
     data, samplerate = sf.read(FILENAME_IN, dtype="float32")
 
-    try:
-        delay_time = float(input("Enter delay time in seconds: "))
-        feedback = float(input("Enter feedback amount: "))
-        mix = float(input("Enter dry/wet mix (0.0 = dry, 1.0 = wet): "))
-    except ValueError:
-        print("Invalid input. Using default delay parameters.")
-        delay_time = .3
-        feedback = .5
-        mix = .5
+    # Build the signal chain interactively
+    signal_chain = build_signal_chain()
+    if signal_chain is None:  # User typed 'quit'
+        print("Exiting program.")
+        return
 
-    print(
-        f"Applying Delay: Time={delay_time}s, Feedback={feedback}, Mix={mix}")
+    # Process the audio through the complete chain
+    print("\n" + "="*50)
+    print("PROCESSING AUDIO")
+    print("="*50)
 
-    # CODE FOR apply_gain
-    '''try:
-        gain_db = float(input("Enter the desired gain in dB: "))
-    except ValueError:
-        print("Invalid input. Using default gain of 0 dB.")
-        gain_db = 0.0
+    if not signal_chain:
+        print("No effects selected. Playing dry signal.")
+        processed_data = data
+    else:
+        chain_names = [func.__name__.replace(
+            'apply_', '') for func, _ in signal_chain]
+        print(f"Processing through chain: {' -> '.join(chain_names)}")
+        processed_data = process_audio_chain(data, samplerate, signal_chain)
 
-    processed_data = apply_gain(data, gain_db)'''
-
-    processed_data = apply_delay(data, samplerate, delay_time, feedback, mix)
-
+    # Save and play the result
+    print("\nSaving processed audio...")
     sf.write(FILENAME_OUT, processed_data, samplerate)
 
     player = AudioPlayer()
-
-    print("Playing audio... Type 'stop' to stop, 'quit' to exit.")
+    print("\n" + "="*50)
+    print("PLAYBACK CONTROLS")
+    print("="*50)
+    print("Playing processed audio...")
+    print("Commands during playback:")
+    print("  'stop' - Stop playback and exit")
+    print("  'quit' - Stop playback and exit")
+    print("  Ctrl+C - Stop playback and exit")
     player.play_audio(processed_data, samplerate)
 
     try:
         while player.is_playing:
             user_input = input("> ").lower().strip()
-            if user_input == 'stop':
+            if user_input in ['stop', 'quit']:
                 player.stop()
                 print("Playback stopped.")
-            elif user_input == 'quit':
-                player.stop()
                 break
-
-            time.sleep(.1)
+            else:
+                print("Unknown command. Type 'stop' to stop playback.")
+            time.sleep(0.1)
     except KeyboardInterrupt:
         print("\nStopping playback...")
         player.stop()
+
+
+def process_audio_chain(input_signal, samplerate, signal_chain):
+    current_signal = input_signal
+
+    for i, (effect_func, params) in enumerate(signal_chain):
+        print(f"Applying {effect_func.__name__.replace('apply_', '')}...")
+
+        try:
+            if effect_func == apply_delay:
+                current_signal = effect_func(
+                    current_signal, samplerate, **params)
+            else:
+                current_signal = effect_func(current_signal, **params)
+
+        except Exception as e:
+            print(f"Error applying {effect_func.__name__}: {e}")
+            print("Continuing with previous signal...")
+
+    return current_signal
 
 
 if __name__ == "__main__":
