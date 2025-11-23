@@ -3,6 +3,7 @@ import sounddevice as sd
 import soundfile as sf
 import threading
 import time
+import random
 
 # AudioPlayer class with flag variables for if the audio is playing and a
 # reference to the Thread object.
@@ -94,45 +95,162 @@ def apply_delay(input_signal, samplerate, delay_time, feedback, mix=.5):
 
     return output_signal
 
+
+def generate_comb_delays(target_time, spread=.005, samplerate=44100):
+    def gcd(a, b):
+        while b:
+            a, b = b, a % b
+        return a
+
+    def are_mutually_prime(numbers):
+        for i in range(len(numbers)):
+            for j in range(i + 1, len(numbers)):
+                if gcd(numbers[i], numbers[j]) != 1:
+                    return False
+
+        return True
+
+    target_samples = int(target_time * samplerate)
+    spread_samples = int(spread * samplerate)
+
+    min_samples = target_samples - spread_samples
+    max_samples = target_samples + spread_samples
+
+    min_samples = max(10, min_samples)
+    max_samples = min(20000, max_samples)
+
+    max_attempts = 500
+
+    for attempt in range(max_attempts):
+        candidates = []
+        for _ in range(4):
+            candidate = random.randint(min_samples, max_samples)
+            candidates.append(candidate)
+
+        if are_mutually_prime(candidates):
+            delay_times = [samples / samplerate for samples in candidates]
+            delay_times.sort()
+
+            return delay_times
+
+    base_delays = [1320, 1636, 1813, 1928]
+    scale_factor = target_time / .0371
+
+    delay_times = [(delay * scale_factor) /
+                   samplerate for delay in base_delays]
+
+    return delay_times
+
+
 # double comb filter
-
-
-def two_parallel_combs(input_signal, samplerate, delay_time1=.03, feedback1=.7, delay_time2=.037, feedback2=.7):
+def four_parallel_combs(input_signal, samplerate, delay_times=[0.0297, 0.0371, 0.0411, 0.0437], feedbacks=[.7, .7, .7, .7]):
     if input_signal.ndim > 1:
         input_signal = np.mean(input_signal, axis=1)
 
     output = np.zeros_like(input_signal)
 
-    M1 = int(delay_time1 * samplerate)
-    M2 = int(delay_time2 * samplerate)
+    num_combs = len(delay_times)
 
-    buffer1 = np.zeros(M1)
-    buffer2 = np.zeros(M2)
-    idx1, idx2 = 0, 0
+    buffers = []
+    indices = []
+    delays_samples = []
+
+    for i in range(num_combs):
+        M = int(delay_times[i] * samplerate)
+        delays_samples.append(M)
+        buffers.append(np.zeros(M))
+        indices.append(0)
 
     for n in range(len(input_signal)):
         current_input = input_signal[n]
+        comb_sum = 0.0
 
-        delayed1 = buffer1[idx1]
-        out1 = current_input + feedback1 * delayed1
-        buffer1[idx1] = current_input + feedback1 * delayed1
-        idx1 = (idx1 + 1) % M1
+        for i in range(num_combs):
+            M = delays_samples[i]
+            g = feedbacks[i]
+            buf = buffers[i]
+            idx = indices[i]
 
-        delayed2 = buffer2[idx2]
-        out2 = current_input + feedback2 * delayed2
-        buffer2[idx2] = current_input + feedback2 * delayed2
-        idx2 = (idx2 + 1) % M2
+            delayed = buf[idx]
 
-        output[n] = (out1 + out2) / 2.0
+            comb_out = current_input + g * delayed
+
+            buf[idx] = current_input + g * delayed
+
+            indices[i] = (idx + 1) % M
+
+            comb_sum += comb_out
+
+        output[n] = comb_sum / num_combs
 
     return output
+
 # applies a digital reverb to the given signal using several parallel comb filters
 # all fed into two all pass filters in series.
 
 
-def apply_reverb(input_signal, samplerate, delay_time=.03, feedback=.7):
-    output_signal = two_parallel_combs(input_signal, samplerate)
-    return output_signal
+def allpass_filter(input_signal, delay_time=.005, gain=.5, samplerate=44100):
+    if input_signal.ndim > 1:
+        input_signal = np.mean(input_signal, axis=1)
+
+    output = np.zeros_like(input_signal)
+    M = int(delay_time * samplerate)
+
+    if M == 0:
+        return input_signal
+
+    delay_buffer = np.zeros(M)
+    buffer_index = 0
+
+    for n in range(len(input_signal)):
+        x = input_signal[n]
+        delayed = delay_buffer[buffer_index]
+
+        y = -gain * x + delayed
+        if n > 0:
+            y += gain * output[n-1]
+
+        delay_buffer[buffer_index] = x + gain * delayed
+
+        buffer_index = (buffer_index + 1) % M
+        output[n] = y
+
+    return output
+
+
+def apply_reverb(input_signal, samplerate, delay_time=.03, feedback=.7, rt60=2.0, mix=.5):
+    if input_signal.ndim > 1:
+        input_signal = np.mean(input_signal, axis=1)
+
+    output = np.zeros_like(input_signal)
+
+    comb_delays = generate_comb_delays(
+        delay_time, spread=.005, samplerate=samplerate)
+
+    comb_feedbacks = []
+    for M_samples in [int(d * samplerate) for d in comb_delays]:
+        g = 10 ** (-3 * M_samples / (rt60 * samplerate))
+        comb_feedbacks.append(g * .9)
+
+    wet_signal = four_parallel_combs(
+        input_signal, samplerate, comb_delays, comb_feedbacks)
+
+    wet_gain = 1.0 / (1.0 + (mix * rt60 * .3))
+    wet_signal = wet_signal * wet_gain
+
+    wet_signal = allpass_filter(
+        wet_signal, delay_time=.005, gain=.5, samplerate=samplerate)
+    wet_signal = allpass_filter(
+        wet_signal, delay_time=.0017, gain=.5, samplerate=samplerate)
+
+    dry_signal = input_signal
+    output = (1-mix) * dry_signal + mix * wet_signal
+
+    peak_before_clip = np. max(np.abs(output))
+    if peak_before_clip > .9:
+        output = np.tanh(output * .95)
+
+    return output
 
 
 EFFECTS_REGISTRY = {
@@ -169,14 +287,17 @@ def get_effect_parameters(effect_name):
 
     elif effect_name == 'reverb':
         try:
-            delay_time = float(input("Enter delay time in seconds: "))
-            feedback = float(input("Enter feedback amount (0.0 - 1.0): "))
+            delay_time = float(input("Enter base delay time in seconds: "))
+            rt60 = float(input("Enter reveb decay time in seconds: "))
+            mix = float(input("Enter dry/wet mix: "))
         except ValueError:
             print("Invalid input, Using default reverb parameters")
             delay_time = .03
-            feedback = .7
+            rt60 = 2.0
+            mix = .5
         params['delay_time'] = delay_time
-        params['feedback'] = feedback
+        params['rt60'] = rt60
+        params['mix'] = mix
 
     # more elif statements for more effects
 
