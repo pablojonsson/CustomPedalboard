@@ -5,6 +5,7 @@ import threading
 import time
 import random
 
+
 # AudioPlayer class with flag variables for if the audio is playing and a
 # reference to the Thread object.
 
@@ -144,6 +145,7 @@ def generate_comb_delays(target_time, spread=.005, samplerate=44100):
 
 # double comb filter
 def four_parallel_combs(input_signal, samplerate, delay_times=[0.0297, 0.0371, 0.0411, 0.0437], feedbacks=[.7, .7, .7, .7]):
+
     if input_signal.ndim > 1:
         input_signal = np.mean(input_signal, axis=1)
 
@@ -162,6 +164,7 @@ def four_parallel_combs(input_signal, samplerate, delay_times=[0.0297, 0.0371, 0
         indices.append(0)
 
     for n in range(len(input_signal)):
+
         current_input = input_signal[n]
         comb_sum = 0.0
 
