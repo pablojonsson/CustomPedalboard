@@ -157,7 +157,7 @@ def get_effect_parameters(effect_name):
         try:
             delay_time = float(input("Enter delay time in seconds: "))
             feedback = float(input("Enter feedback amount (0.0-1.0): "))
-            mix = float(input("Enter drt/wet mix (0.0 = dry, 1.0 = wet): "))
+            mix = float(input("Enter dry/wet mix (0.0 = dry, 1.0 = wet): "))
         except ValueError:
             print("Invalid input. Using default delay parameters")
             delay_time = .3
@@ -249,8 +249,8 @@ def build_signal_chain():
 
 
 def main():
-    FILENAME_IN = "P:\\CustomPedalboard\\AudioSamples\\CleanGuitar.wav"
-    FILENAME_OUT = "P:\\CustomPedalboard\\AudioSamples\\processed_chain.wav"
+    FILENAME_IN = "P:/CustomPedalboard/AudioSamples/CleanGuitar.wav"
+    FILENAME_OUT = "P:/CustomPedalboard/AudioSamples/processed_chain.wav"
 
     data, samplerate = sf.read(FILENAME_IN, dtype="float32")
 
@@ -285,8 +285,6 @@ def main():
     print("Playing processed audio...")
     print("Commands during playback:")
     print("  'stop' - Stop playback and exit")
-    print("  'quit' - Stop playback and exit")
-    print("  Ctrl+C - Stop playback and exit")
     player.play_audio(processed_data, samplerate)
 
     try:
